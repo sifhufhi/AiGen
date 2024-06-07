@@ -1,8 +1,8 @@
 package aigenRest
 
 import (
+	"aigen/aigenAudioAutoPlay"
 	"bytes"
-	"database/sql"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -60,19 +60,23 @@ func SpeakOut(innerVoice string) (string, error) {
 	}
 	tokenReq.Header.Set("Ocp-Apim-Subscription-Key", os.Getenv("SPEECH_KEY"))
 	tokenResp, err := http.DefaultClient.Do(tokenReq)
+
 	if err != nil {
 		return "", err
 	}
+
 	defer func(Body io.ReadCloser) {
 		receiveSpeech := Body.Close()
 		if receiveSpeech != nil {
 			log.Printf("Could not use Subscription Token Or Something with error: %s", receiveSpeech)
 		}
 	}(tokenResp.Body)
+
 	if tokenResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("SpeakOut: unexpected status code %d", tokenResp.StatusCode)
 	}
 	tokenBody, tokenSuccess := ioutil.ReadAll(tokenResp.Body)
+
 	if tokenSuccess != nil {
 		return "", tokenSuccess
 	}
@@ -82,14 +86,17 @@ func SpeakOut(innerVoice string) (string, error) {
 	url := "https://westus.tts.speech.microsoft.com/cognitiveservices/v1"
 	xml := fmt.Sprintf("<speak version='1.0' xml:lang='%s'><voice xml:lang='%s' xml:gender='Male' name='%s'>%s</voice></speak>", innerVoiceLang, innerVoiceLang, innerVoiceName, innerVoice)
 	req, err := http.NewRequest("POST", url, bytes.NewBufferString(xml))
+
 	if err != nil {
 		return "", err
 	}
+
 	req.Header.Set("X-Microsoft-OutputFormat", audio16khz128kbitratemonomp3)
 	req.Header.Set("Content-Type", "application/ssml+xml")
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 	req.Header.Set("User-Agent", "AiGen")
 	resp, restSuccess := http.DefaultClient.Do(req)
+
 	if restSuccess != nil {
 		return "", restSuccess
 	}
@@ -99,6 +106,7 @@ func SpeakOut(innerVoice string) (string, error) {
 			log.Printf("Could not execute speech functionality %s", speechOut)
 		}
 	}(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("SpeakOut: unexpected status code %d", resp.StatusCode)
 	}
@@ -123,7 +131,7 @@ func SpeakOut(innerVoice string) (string, error) {
 
 	joinedFileName := joinFileName(audioPath, randomString, format)
 	log.Printf("File saved to %s", joinedFileName)
-	_, out := updateBotChatAudioPath(joinedFileName)
+	_, out := aigenAudioAutoPlay.UpdateBotChatAudioPath(joinedFileName)
 	if out != nil {
 		log.Printf("Error updating bot chat audio path: %v", err)
 	}
@@ -135,28 +143,4 @@ func SpeakOut(innerVoice string) (string, error) {
 // to create the file name
 func joinFileName(audioPath string, randomString string, format string) string {
 	return audioPath + randomString + format
-}
-
-// updateBotChatAudioPath updates the audio path in the messages table
-// for the last row in the table
-func updateBotChatAudioPath(audioPath string) (string, error) {
-	// SQL update audio for the last row in the messages table
-	dataSourceName := "DB/messages.db"
-	db, err := sql.Open("sqlite3", dataSourceName)
-	if err != nil {
-		log.Printf("Error opening database: %v", err)
-		return "", err
-	}
-	defer func(db *sql.DB) {
-		err := db.Close()
-		if err != nil {
-			log.Printf("Error closing database: %v", err)
-		}
-	}(db)
-
-	_, err = db.Exec("UPDATE messages SET audio = ? WHERE id = (SELECT id FROM messages ORDER BY id DESC LIMIT 1)", audioPath)
-	if err != nil {
-		return "", err
-	}
-	return audioPath, nil
 }
